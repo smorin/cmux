@@ -12226,8 +12226,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 let shortcutTimingStart = CmuxTypingTiming.start()
 #endif
                 let shortcutStart = ProcessInfo.processInfo.systemUptime
-                let handledByShortcut = cmuxCloseFocusedTerminalFindForEscape(event: event, appDelegate: self) || self.handleCustomShortcut(event: event)
+                let handledByShortcut = cmuxCloseFocusedTerminalFindForEscape(event: event, appDelegate: self)
+                    || self.handleDetachedInspectorWindowCloseShortcut(event: event)
+                    || self.handleCustomShortcut(event: event)
 #if DEBUG
+                if event.modifierFlags.contains(.command),
+                   event.charactersIgnoringModifiers?.lowercased() == "w" {
+                    cmuxDebugLog(
+                        "dogloop.devtoolsClose.monitor.cmdW handled=\(handledByShortcut ? 1 : 0) " +
+                        "\(self.debugShortcutRouteSnapshot(event: event))"
+                    )
+                }
                 shortcutMs = (ProcessInfo.processInfo.systemUptime - shortcutStart) * 1000.0
                 CmuxTypingTiming.logDuration(
                     path: "appMonitor.handleCustomShortcut",
@@ -13789,6 +13798,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return true
         }
 
+        return false
+    }
+
+    @discardableResult
+    private func handleDetachedInspectorWindowCloseShortcut(event: NSEvent) -> Bool {
+        guard event.type == .keyDown,
+              matchConfiguredShortcut(event: event, action: .closeTab) else {
+            return false
+        }
+        let window = event.window ?? shortcutRoutingKeyWindow ?? NSApp.keyWindow
+        guard let window, BrowserPanel.isDetachedInspectorWindow(window) else {
+            return false
+        }
+        for panel in allBrowserPanelsForInspectorWindowClose() {
+            if panel.closeDeveloperToolsFromDetachedInspectorWindowUserAction(
+                window,
+                source: "shortcut.\(NSWindow.keyDescription(event))"
+            ) {
+#if DEBUG
+                cmuxDebugLog(
+                    "browser.devtools detachedClose.shortcut panel=\(panel.id.uuidString.prefix(5)) " +
+                    "event=\(NSWindow.keyDescription(event)) window=\(window.windowNumber)"
+                )
+#endif
+                return true
+            }
+        }
         return false
     }
 
@@ -16305,6 +16341,22 @@ private extension NSApplication {
             }
         }
 #endif
+        if event.type == .keyDown,
+           event.modifierFlags.contains(.command),
+           event.charactersIgnoringModifiers?.lowercased() == "w" {
+#if DEBUG
+            let window = event.window ?? AppDelegate.shared?.shortcutRoutingActiveWindow ?? keyWindow ?? mainWindow
+            let eventWindowToken = event.window.map { "\($0.windowNumber):\($0.identifier?.rawValue ?? "nil")" } ?? "nil"
+            let routeWindowToken = window.map { "\($0.windowNumber):\($0.identifier?.rawValue ?? "nil")" } ?? "nil"
+            let keyWindowToken = keyWindow.map { "\($0.windowNumber):\($0.identifier?.rawValue ?? "nil")" } ?? "nil"
+            let mainWindowToken = mainWindow.map { "\($0.windowNumber):\($0.identifier?.rawValue ?? "nil")" } ?? "nil"
+            cmuxDebugLog(
+                "dogloop.devtoolsClose.appSendEvent.cmdW enter eventWindow={\(eventWindowToken)} " +
+                "routeWindow={\(routeWindowToken)} keyWindow={\(keyWindowToken)} " +
+                "mainWindow={\(mainWindowToken)}"
+            )
+#endif
+        }
         if event.type == .leftMouseDown,
            AppDelegate.shared?.handleMinimalModeTitlebarDoubleClickMouseDown(event: event) == true {
             return
@@ -16341,15 +16393,36 @@ private extension NSApplication {
     }
 
     @objc func cmux_sendAction(_ action: Selector, to target: Any?, from sender: Any?) -> Bool {
+#if DEBUG
+        let actionName = NSStringFromSelector(action)
+        if ["__close", "performClose:", "close", "close:"].contains(actionName) {
+            cmuxDebugLog(
+                "dogloop.devtoolsClose.sendAction.enter action=\(actionName) " +
+                "target=\(String(describing: target.map { type(of: $0) })) sender=\(String(describing: sender.map { type(of: $0) }))"
+            )
+        }
+#endif
         if AppDelegate.shared?.handleDetachedInspectorWindowCloseAction(
             action: action,
             target: target,
             sender: sender
         ) == true {
+#if DEBUG
+            let actionName = NSStringFromSelector(action)
+            if ["__close", "performClose:", "close", "close:"].contains(actionName) {
+                cmuxDebugLog("dogloop.devtoolsClose.sendAction.handledInspector action=\(actionName)")
+            }
+#endif
             return true
         }
 
-        return cmux_sendAction(action, to: target, from: sender)
+        let handled = cmux_sendAction(action, to: target, from: sender)
+#if DEBUG
+        if ["__close", "performClose:", "close", "close:"].contains(NSStringFromSelector(action)) {
+            cmuxDebugLog("dogloop.devtoolsClose.sendAction.fallback action=\(NSStringFromSelector(action)) handled=\(handled ? 1 : 0)")
+        }
+#endif
+        return handled
     }
 }
 
@@ -16367,13 +16440,30 @@ private extension AppDelegate {
                 action,
                 target: target,
                 sender: sender
-            ) else { return false }
+            ) else {
+#if DEBUG
+                cmuxDebugLog("dogloop.devtoolsClose.inspectorRoute.skip action=\(NSStringFromSelector(action)) reason=notCloseAction")
+#endif
+                return false
+            }
             guard let window = Self.actionWindow(
                 target: target,
                 sender: sender,
                 allowFallback: Self.allowsWindowFallback(for: action)
-            ),
-                  BrowserPanel.isDetachedInspectorWindow(window) else { return false }
+            ) else {
+#if DEBUG
+                cmuxDebugLog("dogloop.devtoolsClose.inspectorRoute.skip action=\(NSStringFromSelector(action)) reason=noWindow")
+#endif
+                return false
+            }
+            let isInspectorWindow = BrowserPanel.isDetachedInspectorWindow(window)
+#if DEBUG
+            cmuxDebugLog(
+                "dogloop.devtoolsClose.inspectorRoute.window action=\(NSStringFromSelector(action)) " +
+                "window={\(debugWindowToken(window))} inspector=\(isInspectorWindow ? 1 : 0)"
+            )
+#endif
+            guard isInspectorWindow else { return false }
 
             for panel in allBrowserPanelsForInspectorWindowClose() {
                 if panel.closeDeveloperToolsFromDetachedInspectorWindowUserAction(
