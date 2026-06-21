@@ -2148,12 +2148,22 @@ class TabManager: ObservableObject {
     func closeCurrentPanelWithConfirmation() {
 #if DEBUG
         UITestRecorder.incrementInt("closePanelInvocations")
+        cmuxDebugLog(
+            "dogloop.devtoolsClose.closeCurrentPanel enter selected=\(selectedTabId?.uuidString.prefix(5) ?? "nil") " +
+            "focusedWindow=\(AppDelegate.shared?.shortcutRoutingActiveWindow?.windowNumber ?? -1)"
+        )
 #endif
         guard !closeConfirmationInFlight else { return }
         guard let selectedId = selectedTabId,
               let tab = tabs.first(where: { $0.id == selectedId }) else { return }
         reconcileFocusedPanelFromFirstResponderForKeyboard()
         guard let focusedPanelId = shortcutCloseTargetPanelId(in: tab) else { return }
+#if DEBUG
+        cmuxDebugLog(
+            "dogloop.devtoolsClose.closeCurrentPanel target workspace=\(tab.id.uuidString.prefix(5)) " +
+            "panel=\(focusedPanelId.uuidString.prefix(5))"
+        )
+#endif
         closePanelWithConfirmation(tab: tab, panelId: focusedPanelId)
     }
 
