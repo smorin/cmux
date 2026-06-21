@@ -4,9 +4,8 @@ import SwiftUI
 /// Custom back control for the workspace detail that folds the unread-workspace
 /// count INTO the back button itself (one button), instead of a separate pill.
 /// When other workspaces are unread it reads as "‹ 3"; otherwise it is just the
-/// chevron. Tinted with the primary label color (white on the dark terminal bar,
-/// black on a light bar) rather than the accent blue, so the count reads as plain
-/// text with no colored background. The button widens to fit the count.
+/// chevron. The count badge uses a fixed white circle with black text so it stays
+/// readable over the dark terminal chrome regardless of the system color scheme.
 struct WorkspaceBackButton: View {
     let unreadCount: Int
     let action: () -> Void
@@ -22,13 +21,10 @@ struct WorkspaceBackButton: View {
                         // Smaller than the chevron, on a small mono circle.
                         .font(.caption2.weight(.semibold))
                         .monospacedDigit()
-                        // Number contrasts the circle: dark on the white circle
-                        // (dark bar) / light on the black circle (light bar).
-                        .foregroundStyle(Color(.systemBackground))
+                        .foregroundStyle(.black)
                         .padding(2)
                         .frame(minWidth: 18, minHeight: 18)
-                        // White/black circle (adapts), not the accent blue.
-                        .background(.primary, in: .circle)
+                        .background(.white, in: .circle)
                 }
             }
             .contentShape(.rect)
